@@ -20,7 +20,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 APP = ["server_tools", "mcp_stdio", "daemon_tcp", "bridge_e2e"]
 OFFLINE = ["paths", "protocol_sync", "step_grid", "bulk", "chains", "color", "mix_doctor", "midi_export",
-           "quantize", "plugin_library", "preset_library", "resources"]
+           "quantize", "plugin_library", "preset_library", "resources", "read_notes"]
 AUDIO = ["audio_analysis", "melody_extract", "reference_match", "chord_progression", "drums",
          "chords_extract"]
 
