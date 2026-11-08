@@ -78,7 +78,8 @@ This is the most invasive phase — adds the second script type.
 - `fl_piano_clear` — Wipe the active pattern.
 - `fl_piano_quantize` — Snap selected notes.
 - `fl_piano_transpose` — Shift in semitones.
-- `fl_piano_get_notes` — Read back what is in the active pattern.
+- `fl_piano_get_notes` — Read back what is in the active pattern. **Shipped** as
+  `fl_get_piano_roll_notes` (live pyscript dump, with a project-file fallback).
 
 Mechanics:
 1. FL's pyscript sandbox can't receive data the server hands it, so the daemon

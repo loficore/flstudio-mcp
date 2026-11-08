@@ -84,6 +84,7 @@ The PyPI package does not replace the controller/port setup above. The current
 - **Multi-pattern arrangement** — create, name, clone, and mark sections.
 - **Drum patterns in the step sequencer**: read or set a channel's steps in the current pattern, e.g. `x...x...x...x...`, reversible like every other change.
 - **Note and chord writing** into the piano roll, with quantize to a grid (for new notes and existing ones).
+- **Read back the notes** in the open piano roll or in FL's newest project file (including the automatic backup), with pitch, velocity, start and length in ticks, beats and bars — so Claude can analyse what is already there or edit it in place.
 - **Composition in any scale or mode** — Western modes, pentatonic, ragas, maqam, and beyond — through the scale composer, where Claude supplies the notes for the requested scale.
 
 ### Audio analysis
@@ -92,7 +93,7 @@ The PyPI package does not replace the controller/port setup above. The current
 - **Chords-to-MIDI** transcription of polyphonic audio (keys, piano, guitar) with Spotify's Basic Pitch, as notes for the piano roll or a `.mid` file.
 - **Drums to MIDI**: a drum loop or stem to kick, snare, clap, closed and open hi-hat, aligned to the beat, as a `.mid` or straight into the step sequencer of the channels you choose (one undo step).
 
-The server exposes 72 tools across 14 categories, plus 6 live resources (project, mixer, transport, channels, patterns, status) that Claude can read directly.
+The server exposes 73 tools across 14 categories, plus 6 live resources (project, mixer, transport, channels, patterns, status) that Claude can read directly.
 
 ## What sets it apart
 
@@ -105,6 +106,7 @@ These are properties of FL Studio's scripting API, stated plainly:
 - **Plugins, audio files, and rendering are UI-only.** FL's API cannot load a plugin, load an audio file, or render audio. The plugin and preset tools therefore *suggest* — you load the chosen plugin or preset, and Claude then configures it. Audio export is done manually (File > Export); Claude can analyze the rendered file afterward.
 - **Only some plugin parameters accept arbitrary values.** Levels and gains do; stepped parameters (filter types, orders, selectors) snap to their own grid steps, so an off-grid request cannot land; some parameters (Fruity Parametric EQ 2's band widths) ignore writes entirely. The parameter tools re-read and retry, then report `verified: false` with a `hint` and the value FL actually holds, instead of echoing the request as if it had landed.
 - **Note writing is armed once per session.** A generated pyscript writes notes into the piano roll; FL exposes no API to run a pyscript, so you run "MCP_Apply" once from the piano roll's scripting menu at the start of a session.
+- **Note reading has two speeds.** The live path reads the open piano roll exactly, including unsaved edits, and needs the same one-time arm as note writing. When that is not available, the read falls back to FL's newest project file — the automatic backup, refreshed about once a minute — so it can lag the screen by up to a minute; the response says which source it used (`source`, `age_seconds`).
 - **Micro-tonal and gamaka-heavy music is approximated.** Scales with intervals smaller than a semitone (e.g. Arabic maqam) are rounded to the nearest semitone, and traditions built on gamaka/ornamentation (e.g. Carnatic) get the *scale framework* — the correct swaras and intervals — not gamaka or micro-tonal rendering. That's a limit of 12-tone MIDI, not of the tools.
 
 ## Requirements
