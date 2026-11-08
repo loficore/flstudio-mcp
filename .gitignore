@@ -39,3 +39,6 @@ htmlcov/
 
 # Bridge runtime data (don't commit the queue)
 flstudio_mcp_bridge/
+
+# Superpowers scratch (SDD ledger, briefs, review packages)
+.superpowers/
