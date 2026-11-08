@@ -17,7 +17,89 @@ Scripting menu so it becomes FL's "last script".
 
 from __future__ import annotations
 
-from .pyscript_gen import write_apply_script, write_quantize_script
+import contextlib
+import json
+import os
+import secrets
+import time
+
+from .pyscript_gen import (
+    DUMP_FILE_NAME,
+    PIANO_ROLL_SCRIPTS_DIR,
+    write_apply_script,
+    write_dump_script,
+    write_quantize_script,
+)
+
+DEFAULT_DUMP_TIMEOUT = 8.0
+_POLL_INTERVAL = 0.1
+
+
+def _new_nonce() -> str:
+    return secrets.token_hex(4)
+
+
+def _read_dump(path: str, nonce: str) -> dict | None:
+    """Return the dump payload if it is fresh and complete, else None."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("nonce") != nonce:
+        return None
+    return payload
+
+
+def dump_score(nonce=None, timeout=DEFAULT_DUMP_TIMEOUT, scripts_dir=None, trigger=None):
+    """Run the dump script and return the JSON it wrote.
+
+    Deletes any leftover dump first so a trigger that never lands cannot be
+    mistaken for a fresh read; the nonce check covers the race where FL
+    rewrites the file while we poll.
+    """
+    nonce = nonce or _new_nonce()
+    scripts_dir = scripts_dir or PIANO_ROLL_SCRIPTS_DIR
+    dump_path = os.path.join(scripts_dir, DUMP_FILE_NAME)
+
+    with contextlib.suppress(OSError):   # nothing stale to remove
+        os.remove(dump_path)
+
+    try:
+        write_dump_script(nonce, dump_path, scripts_dir)
+    except OSError as e:
+        return {"ok": False, "error": "script write failed",
+                "detail": f"{type(e).__name__}: {e}"}
+
+    if trigger is None:
+        from .pyscript_trigger import trigger_run_last_script
+        trigger = trigger_run_last_script
+
+    try:
+        trig = trigger() or {}
+    except Exception as e:        # trigger is best-effort; report, don't raise
+        return {"ok": False, "error": "trigger failed",
+                "detail": f"{type(e).__name__}: {e}"}
+
+    if trig.get("error") or trig.get("sent_hotkey") is False:
+        return {"ok": False, "error": "trigger failed",
+                "detail": str(trig.get("error") or "the run-last-script shortcut was not sent")}
+
+    deadline = time.monotonic() + float(timeout)
+    while True:
+        payload = _read_dump(dump_path, nonce)
+        if payload is not None:
+            if not payload.get("ok", True):
+                return {"ok": False, "error": "dump failed",
+                        "detail": str(payload.get("error") or "the script reported an error"),
+                        "dump_path": dump_path}
+            return {"ok": True, "payload": payload, "dump_path": dump_path}
+        if time.monotonic() >= deadline:
+            return {"ok": False, "error": "dump timeout", "dump_path": dump_path,
+                    "detail": (f"No dump appeared within {float(timeout):.1f}s. Open the Piano "
+                               "roll and run 'MCP Apply' once from its Scripting menu "
+                               "to arm Run last script again.")}
+        time.sleep(_POLL_INTERVAL)
 
 
 def apply_notes(notes, mode="replace", trigger=True, quantize=None, snap_ends=False):
