@@ -88,6 +88,7 @@ live 只能读当前 pattern（钢琴卷帘跟随 FL 当前选中的 pattern）�
 
 - `source="auto"` 且给了非当前 `pattern` 时，直接走 autosave，因为 live 无法切换 pattern。
 - `source="live"` 且 `pattern` 与当前 pattern 不一致时，返回 `pattern_mismatch` 错误，不静默读错对象。
+- `source="autosave"` 且 `pattern` 在工程里不存在时，返回 `pattern_not_found` 错误，不返回空结果。
 - `source="live"` 的 `pattern_number` 取自控制器 `get_project_state`；`pattern_name` 与 `channel_name` 来自 `pattern_list` / `channel_list`（读不到时为 `null`，不影响音符数据）。
 
 注解：`readOnlyHint: true`、`destructiveHint: false`、`idempotentHint: true`、`openWorldHint: true`。读取不改工程，不进 `safety.safe_write`。
@@ -232,6 +233,7 @@ daemon 侧执行读取的理由：MSIX 版 Claude Desktop 启动的 MCP server �
 | `.flp` 找不到 | `ok: false`，`error: "no project file found"`，附查找路径 |
 | `.flp` 解析失败 | `ok: false`，`error` 带异常类型与文件路径，不吞异常 |
 | `pattern` 与当前 pattern 不一致（live） | `ok: false`，`error: "pattern_mismatch"`，附当前 pattern 号 |
+| `pattern` 不存在（autosave） | `ok: false`，`error: "pattern_not_found"`，附工程内可用的 pattern 号 |
 
 任何失败都不返回半截数据。
 
