@@ -266,6 +266,8 @@ def write_dump_script(nonce: str, dump_path: str, scripts_dir=None) -> str:
     scripts_dir = scripts_dir or PIANO_ROLL_SCRIPTS_DIR
     text = render_dump_script(nonce, dump_path)
     path = os.path.join(scripts_dir, APPLY_SCRIPT_NAME)
-    with open(path, "w", encoding="ascii") as f:
+    # UTF-8, not ASCII: DUMP_PATH bakes in FL's script folder, and user
+    # profiles are not guaranteed to be ASCII (CJK, accented names).
+    with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path

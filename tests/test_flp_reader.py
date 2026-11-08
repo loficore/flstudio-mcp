@@ -19,6 +19,15 @@ def test_parses_channels_patterns_notes_and_tempo(tmp_path):
     assert (n.key, n.position, n.length, n.velocity, n.rack_channel) == (60, 0, 384, 100, 0)
 
 
+def test_rejects_a_file_shorter_than_its_declared_chunk(tmp_path):
+    """A torn autosave must fail, not parse 'ok' with missing tail metadata."""
+    data = build_flp()
+    p = tmp_path / "torn.flp"
+    p.write_bytes(data[:len(data) - 5])      # cut inside the last (tempo) event
+    with pytest.raises(flp_reader.FlpError):
+        flp_reader.parse_flp(p)
+
+
 def test_rejects_bad_header(tmp_path):
     p = tmp_path / "x.flp"
     p.write_bytes(b"nope")
@@ -35,6 +44,16 @@ def test_pattern_new_twice_is_merged_by_iid(tmp_path):
     proj = flp_reader.parse_flp(p)
     assert [(x.iid, x.name, len(x.notes)) for x in proj.patterns] == [
         (1, "Chord", 2), (2, "Melody", 1)]
+
+
+def test_large_note_blob_uses_multibyte_length(tmp_path):
+    """A note blob above 127 bytes needs the multi-byte varint length."""
+    many = [_note(i * 24, 24, 60 + (i % 12), 100) for i in range(200)]
+    p = tmp_path / "big.flp"
+    p.write_bytes(build_flp(patterns=(("Big", 1, many),)))
+    proj = flp_reader.parse_flp(p)
+    assert len(proj.patterns[0].notes) == 200
+    assert proj.patterns[0].notes[-1].key == 60 + (199 % 12)
 
 
 def test_non_four_four_time_signature(tmp_path):

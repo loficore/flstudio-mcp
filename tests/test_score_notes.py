@@ -27,7 +27,7 @@ def test_normalize_live_converts_ticks_velocity_pan_cents():
     n = out["notes"][0]
     assert (n["pitch"], n["start_ticks"], n["length_ticks"]) == (60, 0, 48)
     assert n["start_beats"] == 0.0 and n["length_bars"] == 0.125
-    assert n["velocity"] == 86 and n["pan"] == 0.5 and n["cents"] == -20
+    assert n["velocity"] == 86 and n["pan"] == 0.5 and n["cents"] == -200
     assert n["name"] == "C5"
 
 
@@ -66,7 +66,23 @@ def test_normalize_flp_defaults_to_selected_and_converts_pan_cents():
     assert out["pattern_number"] == 1 and out["channel"] is None
     assert out["time_signature"] == {"numerator": 4, "denominator": 4}
     n = out["notes"][0]
-    assert n["pan"] == 0.75 and n["cents"] == -20 and n["slide"] is True
+    assert n["pan"] == 0.75 and n["cents"] == -200 and n["slide"] is True
+
+
+def test_channel_is_a_rack_position_in_both_backends():
+    """Live sends channel_select(idx); autosave must use the same index, not the iid."""
+    proj = flp_reader.FlpProject(
+        version="", ppq=96, tempo_bpm=None, channel_count=3, selected_pattern=1,
+        channels=[flp_reader.FlpChannel(0, "a"), flp_reader.FlpChannel(2, "b"),
+                  flp_reader.FlpChannel(5, "c")],
+        patterns=[flp_reader.FlpPattern(1, "P", 384, [
+            flp_reader.FlpNote(0, 96, 60, 100, 0, 0, 64, 120, False, 0),
+            flp_reader.FlpNote(96, 96, 62, 100, 2, 0, 64, 120, False, 0),
+            flp_reader.FlpNote(192, 96, 64, 100, 5, 0, 64, 120, False, 0),
+        ])])
+    out = score_notes.normalize_flp(proj, channel=1)      # second rack slot -> iid 2
+    assert out["channel_name"] == "b"
+    assert [n["pitch"] for n in out["notes"]] == [62]
 
 
 def test_normalize_flp_missing_pattern_raises():

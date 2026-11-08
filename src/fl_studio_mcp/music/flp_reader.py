@@ -145,8 +145,11 @@ def parse_flp(path: str | os.PathLike) -> FlpProject:
         raise FlpError("truncated FLdt chunk header")
     body_size = struct.unpack_from("<I", data, offset + 4)[0]
     i = offset + 8
-    end = min(len(data), i + body_size)
-    if i > end:
+    end = i + body_size
+    # FL autosaves about once a minute; reading one mid-write yields a file
+    # shorter than its declared chunk. Reject it rather than silently parsing
+    # a project missing its tail (tempo, selected pattern, time signature).
+    if end > len(data):
         raise FlpError("truncated FLdt chunk")
 
     pattern_by_iid: dict[int, FlpPattern] = {}

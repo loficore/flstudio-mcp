@@ -168,13 +168,17 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool(annotations={
         "title": "Read piano-roll notes",
-        "readOnlyHint": True, "destructiveHint": False,
+        # Not read-only in the strict sense: the live path selects a channel
+        # (which retargets later note writes) and focuses FL. It never edits
+        # project data and never enters the write safety layer.
+        "readOnlyHint": False, "destructiveHint": False,
         "idempotentHint": True, "openWorldHint": True,
     })
     def fl_get_piano_roll_notes(
         channel: Annotated[int | None, Field(
-            description="Channel index to read (0 = first channel). Defaults to the "
-                        "channel the Piano roll already shows. Live path only.",
+            description="Channel rack position (0 = first channel, the same index "
+                        "FL's channel selection uses). Defaults to the channel the "
+                        "Piano roll already shows.",
         )] = None,
         pattern: Annotated[int | None, Field(
             description="Pattern number to read. Defaults to the current pattern. "
@@ -198,6 +202,10 @@ def register(mcp: FastMCP) -> None:
         and falls back to FL's newest project file (the automatic backup, up
         to about a minute old) when the Piano roll is not reachable.
 
+        Passing channel selects that channel on the live path (FL's selection
+        persists, so later note writes go there); with source='autosave' it
+        just filters. The project-file path never changes anything.
+
         Setup for the live path: open the Piano roll and run 'MCP_Apply' once
         from its Scripting menu.
         """
@@ -210,28 +218,51 @@ def register(mcp: FastMCP) -> None:
         current_pattern = None
 
         if source in ("auto", "live"):
-            bridge = get_bridge()
-            state = _project_state(bridge)
-            current_pattern = state.get("pattern_number")
-            if pattern is not None and current_pattern is not None \
-                    and int(pattern) != int(current_pattern):
+            try:
+                bridge = get_bridge()
+            except Exception as e:
+                bridge = None
                 if source == "live":
-                    return {"ok": False, "error": "pattern_mismatch",
-                            "current_pattern": current_pattern,
-                            "detail": "the live path only reads the current pattern; "
-                                      "use source='autosave' for another one."}
-            else:
-                res = _read_live(bridge, channel)
-                if res.get("ok"):
-                    live = res
-                else:
+                    return {"ok": False, "error": "live read failed",
+                            "detail": f"{type(e).__name__}: {e}"}
+                fallback_reason = "live read failed"
+
+            if bridge is not None:
+                state = _project_state(bridge)
+                current_pattern = state.get("pattern_number")
+                if isinstance(current_pattern, int) and current_pattern < 0:
+                    current_pattern = None
+                mismatch = (pattern is not None and current_pattern is not None
+                            and int(pattern) != int(current_pattern))
+                unknown = pattern is not None and current_pattern is None
+                if mismatch or unknown:
                     if source == "live":
-                        return {"ok": False, "error": res.get("error", "live read failed"),
-                                "detail": res.get("detail")}
-                    fallback_reason = res.get("error", "live read failed")
+                        if unknown:
+                            return {"ok": False, "error": "pattern_unverified",
+                                    "detail": "Could not read the current pattern number, so "
+                                              "the open Piano roll cannot be verified against "
+                                              f"pattern={pattern}. Use source='autosave'."}
+                        return {"ok": False, "error": "pattern_mismatch",
+                                "current_pattern": current_pattern,
+                                "detail": "the live path only reads the current pattern; "
+                                          "use source='autosave' for another one."}
+                else:
+                    res = _read_live(bridge, channel)
+                    if res.get("ok"):
+                        live = res
+                    else:
+                        if source == "live":
+                            return {"ok": False,
+                                    "error": res.get("error", "live read failed"),
+                                    "detail": res.get("detail")}
+                        fallback_reason = res.get("error", "live read failed")
 
         if live is not None:
-            out = score_notes.normalize_live(live["payload"], max_notes=max_notes)
+            try:
+                out = score_notes.normalize_live(live["payload"], max_notes=max_notes)
+            except Exception as e:      # malformed script output
+                return {"ok": False, "error": "dump malformed",
+                        "detail": f"{type(e).__name__}: {e}"}
             out.update(_live_meta(bridge, channel, current_pattern))
             out["source"] = "live"
             out["file"] = None

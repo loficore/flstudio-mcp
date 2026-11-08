@@ -12,15 +12,16 @@ import struct
 
 
 def _varint(n: int) -> bytes:
-    groups = []
+    """Little-endian, 7 bits per group -- the FLP/protobuf encoding."""
+    out = bytearray()
     while True:
-        groups.append(n & 0x7F)
+        group = n & 0x7F
         n >>= 7
-        if not n:
-            break
-    groups.reverse()
-    return bytes(g | (0x80 if i < len(groups) - 1 else 0)
-                 for i, g in enumerate(groups))
+        if n:
+            out.append(group | 0x80)
+        else:
+            out.append(group)
+            return bytes(out)
 
 
 def _event(eid: int, value) -> bytes:

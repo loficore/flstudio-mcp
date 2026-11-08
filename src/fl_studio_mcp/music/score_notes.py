@@ -124,7 +124,8 @@ def normalize_live(payload: dict, *, max_notes: int = DEFAULT_MAX_NOTES) -> dict
             length_ticks=int(get(row, "length", 0)),
             velocity=round(float(velocity) * 128),
             pan=float(get(row, "pan", 0.5) or 0.0),
-            cents=int(get(row, "pitchofs", 0) or 0),
+            # FL's pitchofs is in 10-cent steps; the field is spelled cents.
+            cents=int(get(row, "pitchofs", 0) or 0) * 10,
             slide=bool(get(row, "slide", False)),
             porta=bool(get(row, "porta", False)),
             ppq=ppq,
@@ -159,14 +160,17 @@ def normalize_flp(project: FlpProject, *, pattern: int | None = None,
 
     tsnum, tsden = project.time_signature or (4, 4)
     per_bar = beats_per_bar(tsnum, tsden)
+    # ``channel`` is a rack POSITION (what FL's channel_select takes), not a
+    # channel IID: notes store the IID, so translate before filtering.
+    channel_iid = None
     channel_name = None
-    if channel is not None:
-        match = next((c for c in project.channels if c.iid == channel), None)
-        channel_name = match.name if match else None
+    if channel is not None and 0 <= channel < len(project.channels):
+        channel_iid = project.channels[channel].iid
+        channel_name = project.channels[channel].name
 
     notes = []
     for n in (pattern_obj.notes if pattern_obj else []):
-        if channel is not None and n.rack_channel != channel:
+        if channel_iid is not None and n.rack_channel != channel_iid:
             continue
         notes.append(make_note(
             pitch=n.key,
@@ -174,7 +178,8 @@ def normalize_flp(project: FlpProject, *, pattern: int | None = None,
             length_ticks=n.length,
             velocity=n.velocity,
             pan=n.pan / 128.0,
-            cents=n.fine_pitch - 120,
+            # fine_pitch is linear in 10-cent steps (120 = no detune).
+            cents=(n.fine_pitch - 120) * 10,
             slide=n.slide,
             porta=False,
             ppq=project.ppq,

@@ -88,10 +88,12 @@ live 只能读当前 pattern（钢琴卷帘跟随 FL 当前选中的 pattern）�
 
 - `source="auto"` 且给了非当前 `pattern` 时，直接走 autosave，因为 live 无法切换 pattern。
 - `source="live"` 且 `pattern` 与当前 pattern 不一致时，返回 `pattern_mismatch` 错误，不静默读错对象。
+- `source="live"` 且无法读到当前 pattern 号（控制器返回 `-1` / 查询失败）而调用方又指定了 `pattern` 时，返回 `pattern_unverified`，不按"读到的就是它"返回。
+- 控制器用 `-1` 表示"读不到"，`pattern_number` 一律归一为 `null`，不透传哨兵值。
 - `source="autosave"` 且 `pattern` 在工程里不存在时，返回 `pattern_not_found` 错误，不返回空结果。
 - `source="live"` 的 `pattern_number` 取自控制器 `get_project_state`；`pattern_name` 与 `channel_name` 来自 `pattern_list` / `channel_list`（读不到时为 `null`，不影响音符数据）。
 
-注解：`readOnlyHint: true`、`destructiveHint: false`、`idempotentHint: true`、`openWorldHint: true`。读取不改工程，不进 `safety.safe_write`。
+注解：`readOnlyHint: false`、`destructiveHint: false`、`idempotentHint: true`、`openWorldHint: true`。读取不改工程数据，也不进 `safety.safe_write`；但 live 路径会切通道（FL 的选择会保持，影响后续写音符的目标）并聚焦 FL，因此不能声明为严格只读。autosave 路径不改变任何状态。
 
 ### 5.2 dump pyscript
 
@@ -150,18 +152,20 @@ daemon 侧执行读取的理由：MSIX 版 Claude Desktop 启动的 MCP server �
 | 事件 ID | 含义 | 取值 |
 |---|---|---|
 | 64 | `ChannelID.New` | u16，通道 iid |
-| 192 | `ChannelID._Name` | 文本，通道名 |
+| 192 / 203 | `ChannelID._Name` / `PluginID.Name` | 文本，通道名（FL 12+ 写 203，旧工程写 192，两者都收） |
 | 65 | `PatternID.New` | u16，pattern iid（同一 iid 出现两次，按 iid 合并） |
 | 193 | `PatternID.Name` | 文本，pattern 名 |
 | 224 | `PatternID.Notes` | 音符块 |
 | 164 | `PatternID.Length` | u32，pattern 长度（ticks） |
 | 67 | `PatternsID.CurrentlySelected` | u16，当前 pattern |
 | 156 | `ProjectID.Tempo` | u32，BPM × 1000 |
+| 17 / 18 | `ArrangementsID.TimeSigNum` / `TimeSigBeat` | u8，拍号分子/分母 |
 
 结构约定：
 
 - 头部 `FLhd`（14 字节）给出 `ppq`；随后 `FLdt` 块给出事件总长度。
-- 事件 ID < 64 读 1 字节值，< 128 读 2 字节，< 192 读 4 字节，≥ 192 读 varint 长度后跟内容。
+- 事件 ID < 64 读 1 字节值，< 128 读 2 字节，< 192 读 4 字节，≥ 192 读 varint 长度后跟内容。varint 是 protobuf 风格：7 bit 一组、低位在前。
+- `FLdt` 声明的事件总长超过文件实际长度时视为写了一半（FL 每分钟自动备份，可能读到半截），抛 `FlpError`，不返回缺尾部元数据的半份工程。
 - 音符记录定长 24 字节：position u32、flags u16、rack_channel u16、length u32、key u16、group u16、fine_pitch i8、保留 u8、release u8、midi_channel u8、pan u8、velocity u8、mod_x u8、mod_y u8。
 
 工程定位：`fl_settings_dir().parent / "Projects"` 下递归找最新的 `*.flp`（含 `Backup/`），按 mtime 取最大；`FLSTUDIO_MCP_PROJECT` 环境变量可覆盖。返回值带 `file` 与 `age_seconds`。
@@ -215,7 +219,8 @@ daemon 侧执行读取的理由：MSIX 版 Claude Desktop 启动的 MCP server �
 - beats → bars：`beats / (tsnum * 4 / tsden)`。
 - velocity：live 用 `round(v * 128)`；autosave 直接取 `.flp` 的 0..127 值。
 - pan 统一 0..1（0.5 为中）；autosave 用 `pan / 128`。
-- cents 统一半音偏移；autosave 用 `fine_pitch - 120`。
+- cents 统一为音分（1/100 半音）：live 用 `pitchofs × 10`，autosave 用 `(fine_pitch - 120) × 10`（两者源数据都是 10 音分一步）。
+- `channel` 统一是通道架位置（0 起，即 `channel_select` 用的下标）；autosave 先按位置取该通道的 iid，再按 `rack_channel == iid` 过滤。
 - `summary` 在 `truncated` 为真时给出，未截断时同样给出（音符少时几乎零成本）。
 
 `source="autosave"` 时补 `file`（绝对路径）与 `age_seconds`（距最近一次自动备份的秒数）；`source="live"` 时两者为 `null`。
@@ -226,13 +231,16 @@ daemon 侧执行读取的理由：MSIX 版 Claude Desktop 启动的 MCP server �
 
 | 情况 | 返回 |
 |---|---|
-| 未 arm（`Ctrl+Alt+Y` 没落地） | `ok: false`，`error: "note bridge not armed"`，附 arm 指引；`source="auto"` 时回退 autosave |
+| 未 arm / 热键没落地 | `ok: false`，`error: "dump timeout"`，附 arm 指引；`source="auto"` 时回退 autosave |
+| 另一个读写脚本正在触发 | `ok: false`，`error: "script busy"`，提示重试 |
+| dump 内容畸形（缺字段 / PPQ 为 0） | `ok: false`，`error: "dump malformed"`，附异常类型 |
 | 钢琴卷帘打不开 | 同上，错误文案区分 `piano roll unavailable` |
 | dump 超时 | `ok: false`，`error: "dump timeout"`，附 dump 路径与 arm 指引 |
 | dump 的 nonce 不匹配 | 视为未就绪，继续轮询直至超时 |
 | `.flp` 找不到 | `ok: false`，`error: "no project file found"`，附查找路径 |
 | `.flp` 解析失败 | `ok: false`，`error` 带异常类型与文件路径，不吞异常 |
 | `pattern` 与当前 pattern 不一致（live） | `ok: false`，`error: "pattern_mismatch"`，附当前 pattern 号 |
+| 当前 pattern 号不可知但指定了 `pattern`（live） | `ok: false`，`error: "pattern_unverified"` |
 | `pattern` 不存在（autosave） | `ok: false`，`error: "pattern_not_found"`，附工程内可用的 pattern 号 |
 
 任何失败都不返回半截数据。
@@ -241,7 +249,8 @@ daemon 侧执行读取的理由：MSIX 版 Claude Desktop 启动的 MCP server �
 
 - 读取工具不改工程，不进 snapshot / changelog，不产生回滚单元。
 - dump pyscript 只读 `flp.score`，不调用 `addNote` / `clearNotes`。
-- 服务端只写 `Settings/Piano roll scripts/` 下的 `MCP_Apply.pyscript` 与 `MCP_SCORE_DUMP.json`，与既有 note bridge 同一目录，无新增写面。
+- 服务端只写 `Settings/Piano roll scripts/` 下的 `MCP_Apply.pyscript`、`MCP_SCORE_DUMP.json` 与锁文件 `.mcp_script.lock`，与既有 note bridge 同一目录，无新增写面。
+- 读与写共用同一脚本文件和同一个热键，因此写脚本 → 触发 → 等待整段持锁（进程内锁 + 脚本目录内的锁文件，覆盖 daemon 多线程与同时运行的第二个进程）。否则一次读可能插进写的中间：写没落地却报成功，或读的热键执行了写脚本。
 - 不引入 PyFLP，避免 GPL 传染。
 
 ## 9. 测试与门禁

@@ -116,6 +116,76 @@ async def test_live_failure_without_fallback_is_an_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_live_cannot_verify_pattern_without_project_state(monkeypatch):
+    """If the pattern number is unknown, live must fail closed, not read anything."""
+    class NoState(Daw):
+        def call(self, cmd, params=None, **kw):
+            return {}
+    monkeypatch.setattr(connection, "_bridge",
+                        NoState({"ok": True, "payload": _live_payload()}))
+    async with Client(build_server()) as c:
+        result = await c.call_tool("fl_get_piano_roll_notes",
+                                   {"source": "live", "pattern": 3})
+    out = result.data
+    assert out["ok"] is False and out["error"] == "pattern_unverified"
+
+
+@pytest.mark.asyncio
+async def test_live_sentinel_pattern_is_unknown(monkeypatch):
+    """The controller returns -1 when it cannot tell; do not report it."""
+    monkeypatch.setattr(connection, "_bridge",
+                        Daw({"ok": True, "payload": _live_payload()}, pattern_number=-1))
+    async with Client(build_server()) as c:
+        result = await c.call_tool("fl_get_piano_roll_notes", {"source": "live"})
+    out = result.data
+    assert out["ok"] is True and out["pattern_number"] is None
+
+
+@pytest.mark.asyncio
+async def test_auto_falls_back_when_the_bridge_cannot_open(monkeypatch, tmp_path):
+    """A missing MIDI port must degrade auto to the project file, not raise."""
+    f = tmp_path / "x.flp"
+    f.write_bytes(build_flp())
+    monkeypatch.setenv("FLSTUDIO_MCP_PROJECT", str(f))
+    monkeypatch.setattr(connection, "_bridge", None)
+
+    def no_bridge():
+        raise connection.FLPortMissing("No OUTPUT MIDI port matching 'FLStudioMCP'")
+
+    monkeypatch.setattr("fl_studio_mcp.tools.pianoroll.get_bridge", no_bridge)
+    async with Client(build_server()) as c:
+        auto = await c.call_tool("fl_get_piano_roll_notes", {"source": "auto"})
+        live = await c.call_tool("fl_get_piano_roll_notes", {"source": "live"})
+    assert auto.data["source"] == "autosave"
+    assert auto.data["fallback_reason"] == "live read failed"
+    assert live.data["ok"] is False and live.data["error"] == "live read failed"
+    assert "FLPortMissing" in live.data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_malformed_dump_is_reported_not_crashed(monkeypatch):
+    payload = {"ppq": 0, "tsnum": 4, "tsden": 4, "fields": _FIELDS,
+               "notes": [[None, 0, 48, 0.5, 0.5, 0, False, False, 0,
+                          0.5, 0.5, 0.5, 0, 0, False, False]]}
+    monkeypatch.setattr(connection, "_bridge", Daw({"ok": True, "payload": payload}))
+    async with Client(build_server()) as c:
+        result = await c.call_tool("fl_get_piano_roll_notes", {"source": "live"})
+    out = result.data
+    assert out["ok"] is False and out["error"] == "dump malformed"
+
+
+@pytest.mark.asyncio
+async def test_read_tool_is_not_advertised_as_read_only():
+    """The live path selects a channel and focuses FL, so the hint must say so."""
+    async with Client(build_server()) as c:
+        tools = await c.list_tools()
+    tool = next(t for t in tools if t.name == "fl_get_piano_roll_notes")
+    annotations = tool.annotations
+    assert getattr(annotations, "read_only_hint", None) is False
+    assert getattr(annotations, "destructive_hint", None) is False
+
+
+@pytest.mark.asyncio
 async def test_empty_pattern_truncation_and_missing_pattern(monkeypatch, tmp_path):
     f = tmp_path / "x.flp"
     f.write_bytes(build_flp(patterns=(
