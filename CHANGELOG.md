@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keyboard-layout-independent Windows note triggering and optional native FL per-note portamento (#16, #18).
 
 ### Added
+- `fl_get_piano_roll_notes` reads the notes in the open piano roll, or in FL's
+  newest project file (including the automatic backup) when the live read is
+  not available. Returns pitch, velocity, pan, cents, and start/length in ticks,
+  beats and bars, plus a pitch summary. Read-only; no snapshot or changelog
+  entry. Depends on the same one-time `MCP_Apply` arm as note writing.
 - macOS setup support: `scripts/install_macos.sh`, IAC Driver instructions, `Cmd+Opt+Y` note-bridge trigger (#4).
 - `server.json` for MCP Registry publishing; `glama.json` for Glama indexing.
 - PyPI metadata (ownership marker, classifiers).

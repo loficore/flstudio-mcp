@@ -26,7 +26,7 @@ except ImportError as _e:  # pragma: no cover -- surfaced at runtime
 else:
     _mido_import_error = None
 
-from . import protocol
+from . import pianoroll, protocol
 from .protocol import (
     DEFAULT_TIMEOUT_SECONDS,
     DIR_HEARTBEAT,
@@ -268,6 +268,27 @@ class FLBridge:
             res["piano_roll_ensured"] = ensured
         return res
 
+    def read_score(self, channel=None, timeout=pianoroll.DEFAULT_DUMP_TIMEOUT):
+        """Read the open piano roll's notes.
+
+        Opens the Piano roll and, when ``channel`` is given, selects that
+        channel first so the roll shows the notes the caller asked for. Both
+        are best-effort: a failure is returned, not raised, so the tool can
+        fall back to the project file instead of aborting.
+        """
+        if channel is not None:
+            try:
+                self.call(protocol.CMD_CHANNEL_SELECT, {"channel": int(channel)}, timeout=5.0)
+            except Exception as e:
+                return {"ok": False, "error": "channel select failed",
+                        "detail": f"{type(e).__name__}: {e}"}
+        try:
+            self.call(protocol.CMD_ENSURE_PIANO_ROLL, {}, timeout=5.0)
+        except Exception as e:
+            return {"ok": False, "error": "piano roll unavailable",
+                    "detail": f"{type(e).__name__}: {e}"}
+        return pianoroll.dump_score(timeout=timeout)
+
     # -- inbound MIDI callback -----------------------------------------------
 
     def _on_midi(self, msg) -> None:
@@ -415,6 +436,21 @@ class TCPBridge:
             )
         except OSError as e:
             raise self._daemon_unreachable(e)
+
+    def read_score(self, channel=None, timeout=pianoroll.DEFAULT_DUMP_TIMEOUT):
+        """Read the open piano roll via the daemon (it owns the script folder)."""
+        try:
+            resp = self._rpc(
+                {"op": "read_score", "channel": channel, "timeout": timeout},
+                timeout=float(timeout) + 5.0,
+            )
+        except OSError as e:
+            raise self._daemon_unreachable(e) from e
+        if resp.get("ok"):
+            data = resp.get("data")
+            return data if data is not None else resp
+        return {"ok": False, "error": resp.get("error", "daemon returned an error"),
+                "detail": resp.get("exc")}
 
     def open(self) -> None:  # pragma: no cover - parity with FLBridge
         return None

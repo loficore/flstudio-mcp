@@ -133,6 +133,30 @@ def _handle_request(req: dict) -> dict:
             return {"ok": False, "exc": "Error",
                     "error": "%s: %s" % (type(e).__name__, e)}
 
+    if op == "read_score":
+        # Read the open piano roll: the daemon owns the script folder (a
+        # sandboxed MCP server may not be able to write it) and can focus FL.
+        try:
+            channel = req.get("channel")
+            timeout = req.get("timeout")
+            timeout = 8.0 if timeout is None else float(timeout)
+            return {"ok": True, "data": _get_bridge().read_score(channel=channel,
+                                                                 timeout=timeout)}
+        except FLCommandFailed as e:
+            return {"ok": False, "exc": "FLCommandFailed", "error": str(e),
+                    "code": getattr(e, "code", "error")}
+        except FLNotRunning as e:
+            return {"ok": False, "exc": "FLNotRunning", "error": str(e)}
+        except FLTimeout as e:
+            return {"ok": False, "exc": "FLTimeout", "error": str(e)}
+        except FLPortMissing as e:
+            return {"ok": False, "exc": "FLPortMissing", "error": str(e)}
+        except FLBridgeError as e:
+            return {"ok": False, "exc": "FLBridgeError", "error": str(e)}
+        except Exception as e:  # pragma: no cover - defensive
+            return {"ok": False, "exc": "Error",
+                    "error": "%s: %s" % (type(e).__name__, e)}
+
     return {"ok": False, "exc": "Error", "error": "unknown op: %r" % (op,)}
 
 
