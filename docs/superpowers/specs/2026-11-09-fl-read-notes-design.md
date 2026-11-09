@@ -3,7 +3,7 @@
 **Status:** Approved in conversation (2026-11-09) — 方案 A + B（live 实时优先，autosave 回退）
 **Created:** 2026-11-09
 **Spec location:** `docs/superpowers/specs/2026-11-09-fl-read-notes-design.md`
-**Planned implementation:** `docs/superpowers/plans/archieve/2026-11-09-fl-read-notes.md`
+**Planned implementation:** `docs/superpowers/plans/archive/2026-11-09-fl-read-notes.md`
 **Target:** FL Studio 2024 (24.2.2.4597) / Windows 为主，macOS 同构
 
 ---
